@@ -1,10 +1,23 @@
+
 import streamlit as st
-import requests
+import tempfile
+import os
+from gradio_client import Client, handle_file
+
+
 st.set_page_config(
     page_title="VoiceGuard AI",
     page_icon="🎙️",
     layout="wide"
 )
+
+
+# Connect to Hugging Face Space
+@st.cache_resource
+def get_hf_client():
+    return Client("soumili-04/voiceguard-ai")
+
+
 st.markdown(
     """
     <style>
@@ -50,6 +63,9 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+
+# Main heading
 st.markdown(
     '<div class="main-title">🎙️ VoiceGuard AI</div>',
     unsafe_allow_html=True
@@ -64,6 +80,8 @@ st.markdown(
 
 st.divider()
 
+
+# Model selection
 st.subheader("🧠 Choose Detection Model")
 
 st.write(
@@ -71,6 +89,7 @@ st.write(
 )
 
 col1, col2 = st.columns(2)
+
 
 with col1:
 
@@ -107,26 +126,34 @@ with col1:
         "Select VocalGuard",
         use_container_width=True
     )
+
+
 with col2:
+
     st.markdown(
         """
-        <div class="model-card">    
+        <div class="model-card">
 
         <div class="model-title">
         🧠 DeepVoice AI
         </div>
+
         <br>
+
         <b>Transformer-Based Detection</b>
+
         <p class="model-description">
         Uses a pre-trained audio transformer to directly
         analyze speech and identify AI-generated or
         manipulated audio.
         </p>
+
         <p>
         ✓ Audio transformer<br>
         ✓ End-to-end classification<br>
         ✓ Direct deepfake prediction
         </p>
+
         </div>
         """,
         unsafe_allow_html=True
@@ -137,16 +164,24 @@ with col2:
         use_container_width=True
     )
 
+
+# Maintain selected model
 if "selected_model" not in st.session_state:
     st.session_state.selected_model = "approach1"
+
 
 if vocalguard_selected:
     st.session_state.selected_model = "approach1"
 
+
 if deepvoice_selected:
     st.session_state.selected_model = "approach2"
+
+
 st.divider()
 
+
+# Display selected model
 if st.session_state.selected_model == "approach1":
 
     st.success(
@@ -160,6 +195,9 @@ else:
         "🧠 **DeepVoice AI selected** — "
         "Transformer-based deepfake detection"
     )
+
+
+# Audio input section
 st.subheader("🎵 Provide Audio")
 
 input_mode = st.radio(
@@ -174,6 +212,8 @@ input_mode = st.radio(
 
 uploaded_file = None
 
+
+# Upload audio
 if input_mode == "📁 Upload Audio":
 
     uploaded_file = st.file_uploader(
@@ -187,6 +227,8 @@ if input_mode == "📁 Upload Audio":
         ]
     )
 
+
+# Record audio
 else:
 
     recorded_audio = st.audio_input(
@@ -194,8 +236,10 @@ else:
     )
 
     if recorded_audio is not None:
-
         uploaded_file = recorded_audio
+
+
+# Audio preview and analysis
 if uploaded_file is not None:
 
     st.divider()
@@ -209,21 +253,13 @@ if uploaded_file is not None:
     )
 
     st.divider()
+
     if st.button(
         "🔍 Analyze Voice",
         use_container_width=True
     ):
 
-        files = {
-            "file": (
-                uploaded_file.name,
-                uploaded_file.getvalue(),
-                uploaded_file.type
-            )
-        }
-        data = {
-            "approach": st.session_state.selected_model
-        }
+        temp_path = None
 
         with st.spinner(
             "Analyzing audio... This may take a moment."
@@ -231,90 +267,95 @@ if uploaded_file is not None:
 
             try:
 
-                response = requests.post(
-                    "http://127.0.0.1:8000/predict",
-                    files=files,
-                    data=data
+                # Save audio temporarily
+                suffix = os.path.splitext(
+                    uploaded_file.name
+                )[1] or ".wav"
+
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=suffix
+                ) as temp_file:
+
+                    temp_file.write(
+                        uploaded_file.getvalue()
+                    )
+
+                    temp_path = temp_file.name
+
+
+                # Convert selected model
+                # to Hugging Face API format
+                approach = (
+                    "Approach 1"
+                    if st.session_state.selected_model == "approach1"
+                    else "Approach 2"
                 )
 
-                if response.status_code == 200:
 
-                    result = response.json()
-
-                    st.success(
-                        "Analysis completed successfully."
-                    )
-
-                    st.divider()
-
-                    st.markdown(
-                        '<div class="result-title">'
-                        '🔎 Detection Result'
-                        '</div>',
-                        unsafe_allow_html=True
-                    )
-                    st.write(
-                        f"**Model:** "
-                        f"{result.get('approach', 'Unknown')}"
-                    )
-
-                    prediction = result.get(
-                        "prediction",
-                        "Unknown"
-                    )
-
-                    confidence = result.get(
-                        "confidence",
-                        0
-                    )
-                    result_col1, result_col2 = st.columns(2)
+                # Connect to Hugging Face Space
+                client = get_hf_client()
 
 
-                    with result_col1:
+                # Call Gradio API
+                result = client.predict(
+                    audio_path=handle_file(temp_path),
+                    approach=approach,
+                    api_name="/detect_audio"
+                )
 
-                        st.metric(
-                            "Prediction",
-                            prediction
-                        )
+
+                # Extract API outputs
+                prediction_text = result[0]
+                model_details = result[1]
 
 
-                    with result_col2:
+                # Display results
+                st.success(
+                    "Analysis completed successfully."
+                )
 
-                        st.metric(
-                            "Confidence",
-                            f"{confidence:.2f}%"
-                        )
+                st.divider()
 
-                    if (
-                        st.session_state.selected_model
-                        == "approach1"
-                    ):
+                st.markdown(
+                    '<div class="result-title">'
+                    '🔎 Detection Result'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
 
-                        harmonic_ratio = result.get(
-                            "harmonic_ratio"
-                        )
+                st.subheader("Prediction")
 
-                        if harmonic_ratio is not None:
+                st.markdown(
+                    prediction_text
+                )
 
-                            st.write(
-                                f"**Harmonic Energy Ratio:** "
-                                f"{harmonic_ratio:.3f}"
-                            )
+                st.subheader("Model Details")
 
-                else:
-                    st.error(
-                        f"Backend error: {response.text}"
-                    )
-            except requests.exceptions.ConnectionError:
+                st.markdown(
+                    model_details
+                )
+
+
+            except Exception as e:
 
                 st.error(
-                    "❌ Could not connect to the FastAPI backend."
+                    f"Audio analysis failed: {str(e)}"
                 )
 
-                st.info(
-                    "Make sure FastAPI is running on "
-                    "http://127.0.0.1:8000"
-                )
+
+            finally:
+
+                # Delete temporary audio file
+                if (
+                    temp_path is not None
+                    and os.path.exists(temp_path)
+                ):
+
+                    os.remove(temp_path)
+
+
+# Footer
 st.divider()
 
 st.caption(
